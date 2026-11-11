@@ -1,0 +1,79 @@
+{
+ "generado": "2026-11-11T22:35:41+00:00",
+ "demo": false,
+ "estado": {
+  "estado": "PAPEL",
+  "n": 0,
+  "win": 0.4,
+  "pf": null,
+  "exp_r": 0.0,
+  "total_r": 0.0,
+  "p_edge": 0.5,
+  "last20_r": 0.0,
+  "dd_r": 0.0,
+  "max_dd_r": 0.0,
+  "ml": {
+   "activo": false,
+   "auc": null
+  },
+  "params": {
+   "sl_atr": 2.0,
+   "rr": 2.0
+  },
+  "faltan_para_activa": 100
+ },
+ "mercado": {
+  "score": 0.04,
+  "n": 9,
+  "fng": 29,
+  "fng_txt": "Fear"
+ },
+ "config": {
+  "timeframe": "1h",
+  "variante": "rebote_limit",
+  "capital": 1000.0,
+  "riesgo_pct": 0.5,
+  "max_abiertas": 3
+ },
+ "pendientes": [],
+ "abiertas": [
+  {
+   "id": "AVAXUSDT-2026111119",
+   "symbol": "AVAXUSDT",
+   "side": "SHORT",
+   "status": "ABIERTA",
+   "mode": "PAPEL",
+   "tf": "1h",
+   "entry": 8.629,
+   "sl": 8.838,
+   "tp": 8.211,
+   "rr": 2.0,
+   "qty": 23.0,
+   "notional": 198.47,
+   "leverage": 0.2,
+   "risk_usd": 4.81,
+   "created": "2026-11-11T20:00:00+00:00",
+   "valid_until": "2026-11-11T21:00:00+00:00",
+   "filled_at": "2026-11-11T20:55:00+00:00",
+   "closed_at": "",
+   "exit": null,
+   "r": null,
+   "prob": null,
+   "ev_r": 0.0,
+   "reasons": [
+    "régimen diario ↓",
+    "banda +1σ como resistencia",
+    "VWAP 8.55336",
+    "OI 24h +2.0%",
+    "costo 0.03 R"
+   ],
+   "news": {
+    "score": 0.02,
+    "block": false,
+    "titles": []
+   }
+  }
+ ],
+ "cerradas": [],
+ "equity": []
+}
