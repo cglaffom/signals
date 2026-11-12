@@ -1,0 +1,602 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Señales VWAP ±1σ · EMA9/21</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap">
+<style>
+  /* Tema único oscuro, estilo terminal de exchange: fondo casi negro, amarillo de marca, verde/rojo de mercado. */
+  :root {
+    color-scheme: dark;
+    --bg: #0b0e11; --panel: #181a20; --panel-2: #1e2329; --panel-3: #2b3139; --line: #2b3139;
+    --text: #eaecef; --text-2: #b7bdc6; --muted: #848e9c;
+    --yellow: #f0b90b; --yellow-soft: rgba(240,185,11,.14);
+    --green: #0ecb81; --green-soft: rgba(14,203,129,.14);
+    --red: #f6465d; --red-soft: rgba(246,70,93,.14);
+    --blue: #3b9dff;
+    --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); }
+  body { margin: 0; color: var(--text); font: 14px/1.5 var(--sans); -webkit-font-smoothing: antialiased; }
+  body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--panel); }
+  button { font: inherit; color: inherit; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .up { color: var(--green); } .down { color: var(--red); } .warn { color: var(--yellow); } .muted { color: var(--muted); }
+
+  /* Barra superior fija */
+  .topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line); }
+  .topbar .in { max-width: 1180px; margin: 0 auto; display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap;
+    padding-block: 10px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; letter-spacing: -.01em; }
+  .logo { width: 28px; height: 28px; border-radius: 7px; background: var(--yellow); color: #0b0e11; display: grid; place-items: center;
+    font: 700 13px/1 var(--mono); }
+  .brand small { font-weight: 500; color: var(--muted); font-size: 12px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    border: 1px solid currentColor; }
+  .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .pill.live .dot { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .spacer { flex: 1; }
+  .refresh { display: inline-flex; align-items: center; gap: 8px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 10px; cursor: pointer; font-size: 12px; color: var(--text-2); }
+  .refresh:hover { border-color: var(--yellow); color: var(--text); }
+  .refresh svg { display: block; }
+
+  /* Cinta de precios */
+  .ticker { border-bottom: 1px solid var(--line); background: var(--bg); }
+  .ticker .in { max-width: 1180px; margin: 0 auto; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
+    padding-block: 8px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .ticker .in::-webkit-scrollbar { display: none; }
+  .tk { flex: none; display: flex; align-items: baseline; gap: 8px; padding: 4px 10px; border-radius: 6px; background: var(--panel);
+    border: 1px solid transparent; font-size: 12px; white-space: nowrap; }
+  .tk b { font-weight: 600; }
+  .tk.flash-up { border-color: var(--green); } .tk.flash-down { border-color: var(--red); }
+
+  main { max-width: 1180px; margin: 0 auto; padding-block: 16px 48px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+
+  /* Pestañas */
+  .tabs { display: flex; gap: 22px; border-bottom: 1px solid var(--line); margin-bottom: 16px; }
+  .tab { background: none; border: 0; padding: 10px 0; cursor: pointer; color: var(--muted); font-weight: 600; font-size: 15px;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--yellow); }
+  .tab:hover { color: var(--text); }
+  .tab .cnt { margin-left: 6px; font: 600 11px/1 var(--mono); padding: 2px 6px; border-radius: 4px; background: var(--yellow-soft); color: var(--yellow); }
+  :focus-visible { outline: 2px solid var(--yellow); outline-offset: 2px; border-radius: 4px; }
+
+  .banner { margin: 0 0 14px; padding: 10px 12px; border-radius: 8px; background: var(--yellow-soft); color: var(--yellow); font-size: 13px; }
+  .banner.err { background: var(--red-soft); color: var(--red); }
+
+  /* Tarjetas de métricas */
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .tile { background: var(--panel); border-radius: 10px; padding: 12px 14px; min-width: 0; border: 1px solid transparent; transition: border-color .15s; }
+  .tile:hover { border-color: var(--panel-3); }
+  .tile .label { font-size: 12px; color: var(--muted); }
+  .tile .value { font: 600 22px/1.25 var(--mono); margin-top: 2px; }
+  .tile .sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .meter { height: 4px; border-radius: 2px; background: var(--panel-3); margin-top: 8px; overflow: hidden; }
+  .meter i { display: block; height: 100%; border-radius: 2px; }
+
+  h2 { font-size: 15px; font-weight: 600; margin: 26px 0 10px; display: flex; align-items: center; gap: 8px; }
+  h2 .cnt { font: 600 11px/1 var(--mono); padding: 3px 7px; border-radius: 4px; background: var(--panel-3); color: var(--text-2); }
+  h2 small { font-weight: 400; color: var(--muted); font-size: 12px; }
+  .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 16px; }
+  @media (max-width: 860px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+
+  .panel { background: var(--panel); border-radius: 10px; padding: 14px; min-width: 0; }
+  .empty { color: var(--muted); font-size: 13px; padding: 14px; background: var(--panel); border-radius: 10px; border: 1px dashed var(--panel-3); }
+
+  /* Órdenes y posiciones */
+  .orders { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr)); gap: 10px; }
+  .order { background: var(--panel); border-radius: 10px; padding: 14px; border-left: 3px solid var(--muted); min-width: 0; }
+  .order.long { border-left-color: var(--green); } .order.short { border-left-color: var(--red); }
+  .order .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .sym { font-weight: 700; font-size: 16px; }
+  .sym small { color: var(--muted); font-weight: 500; font-size: 12px; margin-left: 2px; }
+  .side { font: 700 11px/1 var(--sans); padding: 4px 7px; border-radius: 4px; margin-left: 8px; letter-spacing: .03em; }
+  .side.long { background: var(--green-soft); color: var(--green); } .side.short { background: var(--red-soft); color: var(--red); }
+  .mode { font-size: 11px; color: var(--yellow); border: 1px solid var(--yellow); border-radius: 4px; padding: 1px 5px; margin-left: 6px; }
+  .pnl { text-align: right; }
+  .pnl .big { font: 700 18px/1.2 var(--mono); }
+  .pnl .small { font-size: 12px; }
+  .levels { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin: 12px 0 10px; }
+  .levels div span { display: block; font-size: 11px; color: var(--muted); }
+  .levels div b { font: 600 13px/1.3 var(--mono); }
+  .track { position: relative; height: 8px; border-radius: 4px; margin: 18px 0 22px;
+    background: linear-gradient(90deg, var(--red) 0%, rgba(246,70,93,.25) var(--e), rgba(14,203,129,.25) var(--e), var(--green) 100%); }
+  .track .mk { position: absolute; top: 50%; width: 2px; height: 16px; transform: translate(-50%, -50%); background: var(--text-2); border-radius: 1px; }
+  .track .px { position: absolute; top: 50%; width: 14px; height: 14px; transform: translate(-50%, -50%); border-radius: 50%; background: var(--yellow);
+    border: 3px solid var(--bg); box-shadow: 0 0 0 1px var(--yellow); transition: left .4s ease; }
+  .track .lb { position: absolute; top: 14px; transform: translateX(-50%); font: 500 10px/1 var(--mono); color: var(--muted); white-space: nowrap; }
+  .track .lb.l { transform: none; left: 0 !important; } .track .lb.r { transform: none; right: 0; left: auto !important; }
+  .why { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--panel-2); color: var(--text-2); }
+  .meta { font-size: 12px; color: var(--muted); margin-top: 10px; }
+
+  /* Tablas */
+  .scroll { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 8px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th.sort { cursor: pointer; user-select: none; } th.sort:hover { color: var(--text); } th.on { color: var(--yellow); }
+  td { padding: 9px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  tbody tr:hover { background: var(--panel-2); }
+  td.r, th.r { text-align: right; }
+  .tag { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 12px; padding: 2px 8px; border-radius: 4px; }
+  .tag.tp { background: var(--green-soft); color: var(--green); } .tag.sl { background: var(--red-soft); color: var(--red); }
+  .tag.time { background: var(--panel-3); color: var(--text-2); }
+  .filters { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .fbtn { background: var(--panel-2); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; color: var(--text-2); }
+  .fbtn[aria-pressed="true"] { border-color: var(--yellow); color: var(--yellow); }
+
+  /* Gráficos */
+  .chart { position: relative; }
+  .chart svg { display: block; width: 100%; touch-action: pan-y; outline: none; }
+  .tip { position: absolute; top: 0; pointer-events: none; background: var(--panel-2); border: 1px solid var(--panel-3); border-radius: 8px;
+    padding: 6px 10px; font-size: 12px; white-space: nowrap; display: none; box-shadow: 0 6px 18px rgba(0,0,0,.5); z-index: 2; }
+  .tip b { font: 700 14px/1.3 var(--mono); display: block; }
+  .bars { display: grid; gap: 6px; }
+  .bar { display: grid; grid-template-columns: 64px minmax(0, 1fr) 76px; align-items: center; gap: 10px; font-size: 12px; cursor: default; }
+  .bar .t { position: relative; height: 18px; }
+  .bar .t::before { content: ""; position: absolute; left: var(--z); top: -3px; bottom: -3px; width: 1px; background: var(--panel-3); }
+  .bar .t i { position: absolute; top: 3px; bottom: 3px; border-radius: 3px; transition: opacity .15s; }
+  .bar:hover .t i { opacity: .75; }
+  .bar .v { text-align: right; }
+  .sortbar { display: flex; gap: 6px; flex-wrap: wrap; }
+  .sides { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .verdict { background: var(--panel); border-radius: 10px; padding: 14px; border-left: 3px solid var(--yellow); font-size: 13px; color: var(--text-2); }
+  .verdict b { color: var(--yellow); }
+  details { margin-top: 12px; }
+  details summary { cursor: pointer; color: var(--text-2); font-size: 13px; padding: 6px 0; }
+  details summary:hover { color: var(--yellow); }
+  footer { margin-top: 30px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 14px; }
+
+  @media (max-width: 520px) {
+    .levels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tile .value { font-size: 19px; }
+    .bar { grid-template-columns: 52px minmax(0, 1fr) 64px; }
+    .brand small { display: none; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="topbar"><div class="in">
+  <div class="brand"><span class="logo">V</span><span>VWAP ±1σ · EMA9/21 <small>señales de futuros</small></span></div>
+  <span id="estado"></span>
+  <span class="spacer"></span>
+  <span class="muted" id="hora" style="font-size:12px"></span>
+  <button class="refresh" id="refresh" type="button" title="Actualizar ahora">
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="none" stroke="var(--panel-3)" stroke-width="2"/>
+      <circle id="ring" cx="8" cy="8" r="6" fill="none" stroke="var(--yellow)" stroke-width="2" stroke-dasharray="37.7" stroke-dashoffset="0" transform="rotate(-90 8 8)"/></svg>
+    <span id="cd">Actualizar</span>
+  </button>
+</div></div>
+<div class="ticker"><div class="in" id="ticker"></div></div>
+
+<main>
+  <div role="tablist" class="tabs">
+    <button class="tab" role="tab" id="tab-en-vivo" aria-selected="true" aria-controls="en-vivo" type="button">En vivo<span class="cnt" id="tab-cnt" hidden></span></button>
+    <button class="tab" role="tab" id="tab-backtest" aria-selected="false" aria-controls="backtest" type="button">Backtest</button>
+  </div>
+  <div id="banner"></div>
+
+  <section id="en-vivo" role="tabpanel" aria-labelledby="tab-en-vivo">
+    <div class="tiles" id="tiles"></div>
+    <h2>Posiciones abiertas <span class="cnt" id="n-open">0</span> <small>precio de Binance Futuros cada 10 s</small></h2>
+    <div class="orders" id="abiertas"></div>
+    <h2>Órdenes pendientes <span class="cnt" id="n-pend">0</span></h2>
+    <div class="orders" id="pendientes"></div>
+    <div class="grid2">
+      <div><h2>Resultado en vivo <small>R acumulado</small></h2><div class="panel chart" id="eq-live"></div></div>
+      <div><h2>Últimos cierres</h2>
+        <div class="panel">
+          <div class="filters" id="cl-filters"></div>
+          <div class="scroll" id="cerradas"></div>
+        </div></div>
+    </div>
+  </section>
+
+  <section id="backtest" role="tabpanel" aria-labelledby="tab-backtest" hidden>
+    <div class="verdict" id="bt-veredicto"></div>
+    <h2>Resumen <small id="bt-periodo"></small></h2>
+    <div class="tiles" id="bt-tiles"></div>
+    <h2>Curva con cupo de posiciones <small>R acumulado · pasa el cursor</small></h2>
+    <div class="panel chart" id="eq-bt"></div>
+    <div class="grid2">
+      <div>
+        <h2>Por par <small>R total</small></h2>
+        <div class="panel"><div class="sortbar filters" id="sym-sort"></div><div class="bars" id="by-sym"></div></div>
+      </div>
+      <div>
+        <h2>Long contra short</h2>
+        <div class="sides" id="by-side"></div>
+        <h2>Monte Carlo del PF <small id="mc-sub"></small></h2>
+        <div class="panel chart" id="mc-hist"></div>
+      </div>
+    </div>
+    <details><summary>Resultado por mes</summary><div class="panel scroll" id="bt-mes" style="margin-top:8px"></div></details>
+    <details><summary>Reglas originales, sin filtro de régimen diario</summary><div class="panel scroll" id="bt-base" style="margin-top:8px"></div></details>
+  </section>
+
+  <footer>Solo señales: esta página no envía órdenes. En modo PAPEL la estrategia no ha demostrado ventaja estadística
+    en vivo y no debe operarse con dinero real. R = múltiplos del riesgo por operación. Precios en vivo: API pública de Binance Futuros.</footer>
+</main>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const SVG = "http://www.w3.org/2000/svg";
+// Todo dato externo entra por textContent, nunca por innerHTML.
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const k in (attrs || {})) {
+    const v = attrs[k]; if (v == null || v === false) continue;
+    k === "class" ? e.className = v : k === "style" ? e.style.cssText = v : k.startsWith("on") ? e.addEventListener(k.slice(2), v) : e.setAttribute(k, v);
+  }
+  for (const c of kids) if (c != null && c !== false) e.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  return e;
+}
+function s(tag, attrs) { const e = document.createElementNS(SVG, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); return e; }
+const clear = el => { while (el.firstChild) el.removeChild(el.firstChild); return el; };
+const fmtP = x => { if (x == null || !isFinite(x)) return "–"; const a = Math.abs(x); const d = a >= 1000 ? 1 : a >= 100 ? 2 : a >= 10 ? 3 : a >= 1 ? 4 : a >= 0.01 ? 5 : 7; return Number(x).toFixed(d); };
+const sign = x => x > 0 ? "+" : x < 0 ? "−" : "";
+const fmtR = x => x == null || !isFinite(x) ? "–" : sign(x) + Math.abs(x).toFixed(Math.abs(x) >= 100 ? 0 : Math.abs(x) >= 10 ? 1 : 2) + " R";
+const fmtU = x => x == null || !isFinite(x) ? "–" : sign(x) + Math.abs(x).toFixed(2) + " USDT";
+const p2 = n => String(n).padStart(2, "0");
+const fmtT = iso => { if (!iso) return "–"; const d = new Date(iso); return p2(d.getDate()) + "/" + p2(d.getMonth() + 1) + " " + p2(d.getHours()) + ":" + p2(d.getMinutes()); };
+const fx = (x, n) => x == null || !isFinite(x) ? "–" : Number(x).toFixed(n);
+const fmtD = ts => new Date(ts * 1000).toLocaleDateString("es-PE", { day: "2-digit", month: "short" });
+const cls = x => x > 0 ? "up" : x < 0 ? "down" : "";
+const pfCls = x => x == null ? "" : x >= 1 ? "up" : "down";
+const ago = iso => { const m = Math.round((Date.now() - new Date(iso)) / 60000); return m < 1 ? "hace segundos" : m < 60 ? "hace " + m + " min" : "hace " + Math.round(m / 60) + " h"; };
+const base = sym => String(sym).replace(/USDT$/, "");
+
+const STATUS = {
+  PAPEL:   { color: "var(--yellow)", text: "PAPEL · sin ventaja demostrada" },
+  ACTIVA:  { color: "var(--green)",  text: "ACTIVA" },
+  PAUSADA: { color: "var(--red)",    text: "PAUSADA" },
+};
+const RESULT = { TP: ["tp", "✓ TP"], SL: ["sl", "✕ SL"], TIEMPO: ["time", "Tiempo"] };
+
+function tile(label, value, sub, valueCls, meter) {
+  return h("div", { class: "tile" }, h("div", { class: "label" }, label), h("div", { class: "value " + (valueCls || "") }, value),
+    sub ? h("div", { class: "sub" }, sub) : null,
+    meter ? h("div", { class: "meter" }, h("i", { style: `width:${Math.max(0, Math.min(100, meter[0]))}%;background:${meter[1]}` })) : null);
+}
+
+/* ---------- Precios en vivo (Binance Futuros, sin clave) ---------- */
+const PRICES = {}, CHG = {};
+async function fetchPrices(symbols) {
+  await Promise.all([...new Set(symbols)].map(async sym => {
+    try {
+      const r = await fetch("https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=" + encodeURIComponent(sym), { cache: "no-store" });
+      if (!r.ok) return;
+      const j = await r.json(); const p = +j.lastPrice;
+      if (isFinite(p)) { CHG[sym] = { prev: PRICES[sym], pct: +j.priceChangePercent }; PRICES[sym] = p; }
+    } catch (e) { /* sin red: se deja el último precio */ }
+  }));
+}
+function renderTicker(symbols) {
+  const el = clear($("ticker"));
+  for (const sym of symbols) {
+    const p = PRICES[sym], c = CHG[sym] || {}, moved = c.prev != null && p !== c.prev;
+    el.append(h("div", { class: "tk" + (moved ? (p > c.prev ? " flash-up" : " flash-down") : "") },
+      h("b", {}, base(sym)), h("span", { class: "num " + (moved ? (p > c.prev ? "up" : "down") : "") }, fmtP(p)),
+      h("span", { class: "num " + cls(c.pct) }, c.pct == null ? "" : sign(c.pct) + Math.abs(c.pct).toFixed(2) + "%")));
+  }
+}
+
+/* ---------- Órdenes ---------- */
+function orderCard(o, open) {
+  const long = o.side === "LONG", sd = long ? 1 : -1, p = PRICES[o.symbol];
+  const risk = Math.abs(o.entry - o.sl), span = Math.abs(o.tp - o.sl) || 1;
+  const posOf = v => Math.max(0, Math.min(100, (sd * (v - o.sl)) / span * 100));
+  const ePos = posOf(o.entry);
+  let right;
+  if (open && p != null) {
+    const r = sd * (p - o.entry) / (risk || 1), usd = sd * (p - o.entry) * o.qty;
+    right = h("div", { class: "pnl" }, h("div", { class: "big " + cls(r) }, fmtR(r)), h("div", { class: "small num " + cls(usd) }, fmtU(usd)));
+  } else if (!open && p != null) {
+    const d = (o.entry / p - 1) * 100;
+    right = h("div", { class: "pnl" }, h("div", { class: "small muted" }, "límite a"), h("div", { class: "big num warn" }, sign(d) + Math.abs(d).toFixed(2) + "%"));
+  } else right = h("div", { class: "pnl small muted" }, "cargando precio…");
+  const track = h("div", { class: "track", style: `--e:${ePos}%`, title: "Stop ← entrada → objetivo" },
+    h("span", { class: "mk", style: `left:${ePos}%` }),
+    h("span", { class: "lb l" }, "SL"), h("span", { class: "lb", style: `left:${ePos}%` }, open ? "entrada" : "límite"), h("span", { class: "lb r" }, "TP"),
+    p != null ? h("span", { class: "px", style: `left:${posOf(p)}%`, title: "Precio actual " + fmtP(p) }) : null);
+  return h("article", { class: "order " + (long ? "long" : "short") },
+    h("div", { class: "top" },
+      h("div", {}, h("span", { class: "sym" }, base(o.symbol), h("small", {}, "USDT")),
+        h("span", { class: "side " + (long ? "long" : "short") }, long ? "LONG" : "SHORT"), o.mode ? h("span", { class: "mode" }, o.mode) : null),
+      right),
+    h("div", { class: "levels" },
+      h("div", {}, h("span", {}, open ? "Entrada" : "Límite"), h("b", {}, fmtP(o.entry))),
+      h("div", {}, h("span", {}, "Precio"), h("b", { class: "warn" }, fmtP(p))),
+      h("div", {}, h("span", {}, "Stop"), h("b", { class: "down" }, fmtP(o.sl))),
+      h("div", {}, h("span", {}, "Objetivo · RR " + o.rr), h("b", { class: "up" }, fmtP(o.tp)))),
+    track,
+    h("div", { class: "why" }, ...(o.reasons || []).map(r => h("span", { class: "chip" }, r))),
+    h("div", { class: "meta num" }, "Tamaño " + Number(o.qty).toPrecision(5).replace(/\.?0+$/, "") + " · ≈" + Math.round(o.notional) +
+      " USDT · " + o.leverage + "x · riesgo " + o.risk_usd + " USDT · " + (open ? "abierta " + fmtT(o.filled_at) : "válida hasta " + fmtT(o.valid_until))));
+}
+
+function table(el, head, rows, empty) {
+  clear(el);
+  if (!rows.length) { el.append(h("div", { class: "muted", style: "font-size:13px;padding:6px 0" }, empty || "Sin datos todavía.")); return; }
+  const t = h("table", {}, h("thead", {}, h("tr", {}, ...head.map(c => h("th", { class: c.r ? "r" : "" }, c.t)))));
+  const tb = h("tbody");
+  for (const r of rows) tb.append(h("tr", {}, ...r.map((c, i) => {
+    const v = c && c.v !== undefined ? c : { v: c };
+    return h("td", { class: (head[i].r ? "r " : "") + "num " + (v.c || "") }, v.v);
+  })));
+  t.append(tb); el.append(t);
+}
+
+/* ---------- Curva de R: línea amarilla, área verde sobre 0 y roja bajo 0 ---------- */
+let CID = 0;
+function lineChart(el, pts, name) {
+  clear(el);
+  if (!pts || pts.length < 2) { el.append(h("div", { class: "muted", style: "font-size:13px;padding:30px 0;text-align:center" }, "Aún no hay cierres para graficar.")); return; }
+  const W = Math.max(280, el.clientWidth - 28), H = 220, m = { l: 40, r: 64, t: 12, b: 24 }, id = "c" + (++CID);
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  let lo = Math.min(0, ...ys), hi = Math.max(0, ...ys);
+  const raw = (hi - lo || 1) / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const stp = [1, 2, 2.5, 5, 10].map(k => k * mag).find(v => v >= raw);
+  lo = Math.floor(lo / stp) * stp; hi = Math.ceil(hi / stp) * stp;
+  const x = t => m.l + (t - xs[0]) / (xs[xs.length - 1] - xs[0] || 1) * (W - m.l - m.r);
+  const y = v => m.t + (hi - v) / (hi - lo) * (H - m.t - m.b);
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, height: H, tabindex: 0, role: "img",
+    "aria-label": `${name}: ${fmtR(ys[ys.length - 1])} tras ${pts.length} puntos. Flechas izquierda y derecha para recorrer.` });
+  const defs = s("defs", {});
+  const gU = s("linearGradient", { id: id + "u", x1: 0, x2: 0, y1: 0, y2: 1 });
+  gU.append(s("stop", { offset: 0, "stop-color": "#0ecb81", "stop-opacity": .35 }), s("stop", { offset: 1, "stop-color": "#0ecb81", "stop-opacity": .02 }));
+  const gD = s("linearGradient", { id: id + "d", x1: 0, x2: 0, y1: 1, y2: 0 });
+  gD.append(s("stop", { offset: 0, "stop-color": "#f6465d", "stop-opacity": .35 }), s("stop", { offset: 1, "stop-color": "#f6465d", "stop-opacity": .02 }));
+  const cU = s("clipPath", { id: id + "cu" }); cU.append(s("rect", { x: 0, y: 0, width: W, height: y(0) }));
+  const cD = s("clipPath", { id: id + "cd" }); cD.append(s("rect", { x: 0, y: y(0), width: W, height: H }));
+  defs.append(gU, gD, cU, cD); svg.append(defs);
+  for (let v = lo; v <= hi + 1e-9; v += stp) {
+    svg.append(s("line", { x1: m.l, x2: W - m.r, y1: y(v), y2: y(v), stroke: Math.abs(v) < 1e-9 ? "#474d57" : "#2b3139", "stroke-width": 1, "stroke-dasharray": Math.abs(v) < 1e-9 ? "" : "2 4" }));
+    const tx = s("text", { x: m.l - 6, y: y(v) + 4, "text-anchor": "end", "font-size": 11, fill: "#848e9c", "font-family": "IBM Plex Mono, monospace" });
+    tx.textContent = Math.round(v * 100) / 100; svg.append(tx);
+  }
+  for (const i of [0, Math.floor(pts.length / 2), pts.length - 1]) {
+    const tx = s("text", { x: x(xs[i]), y: H - 6, "text-anchor": i === 0 ? "start" : i === pts.length - 1 ? "end" : "middle", "font-size": 11, fill: "#848e9c" });
+    tx.textContent = fmtD(xs[i]); svg.append(tx);
+  }
+  const d = pts.map((p, i) => (i ? "L" : "M") + x(p[0]).toFixed(1) + " " + y(p[1]).toFixed(1)).join("");
+  const area = d + `L${x(xs[xs.length - 1]).toFixed(1)} ${y(0)}L${x(xs[0]).toFixed(1)} ${y(0)}Z`;
+  svg.append(s("path", { d: area, fill: `url(#${id}u)`, "clip-path": `url(#${id}cu)` }));
+  svg.append(s("path", { d: area, fill: `url(#${id}d)`, "clip-path": `url(#${id}cd)` }));
+  svg.append(s("path", { d, fill: "none", stroke: "#f0b90b", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  const last = ys[ys.length - 1], ex = x(xs[xs.length - 1]), ey = y(last), endCol = last >= 0 ? "#0ecb81" : "#f6465d";
+  svg.append(s("circle", { cx: ex, cy: ey, r: 5, fill: "#f0b90b", stroke: "#181a20", "stroke-width": 2 }));
+  const tag = s("rect", { x: ex + 8, y: ey - 10, width: 54, height: 20, rx: 4, fill: endCol });
+  const end = s("text", { x: ex + 35, y: ey + 4, "text-anchor": "middle", "font-size": 11, "font-weight": 700, fill: "#0b0e11", "font-family": "IBM Plex Mono, monospace" });
+  end.textContent = fmtR(last).replace(" R", "R"); svg.append(tag, end);
+  const cross = s("line", { y1: m.t, y2: H - m.b, stroke: "#848e9c", "stroke-width": 1, "stroke-dasharray": "3 3", visibility: "hidden" });
+  const crossH = s("line", { x1: m.l, x2: W - m.r, stroke: "#848e9c", "stroke-width": 1, "stroke-dasharray": "3 3", visibility: "hidden" });
+  const mark = s("circle", { r: 5, fill: "#f0b90b", stroke: "#181a20", "stroke-width": 2, visibility: "hidden" });
+  svg.append(cross, crossH, mark);
+  const tip = h("div", { class: "tip" }), tv = h("b"), tl = h("div", { class: "muted" }), td = h("div", { class: "num" });
+  tip.append(tv, td, tl);
+  let cur = pts.length - 1;
+  function show(i) {
+    cur = Math.max(0, Math.min(pts.length - 1, i));
+    const px = x(xs[cur]), py = y(ys[cur]), k = svg.getBoundingClientRect().width / W;
+    cross.setAttribute("x1", px); cross.setAttribute("x2", px); crossH.setAttribute("y1", py); crossH.setAttribute("y2", py);
+    mark.setAttribute("cx", px); mark.setAttribute("cy", py);
+    for (const e of [cross, crossH, mark]) e.setAttribute("visibility", "visible");
+    tv.textContent = fmtR(ys[cur]); tv.className = cls(ys[cur]);
+    const dl = cur ? ys[cur] - ys[cur - 1] : ys[cur];
+    td.textContent = "operación " + fmtR(dl); td.className = "num " + cls(dl);
+    tl.textContent = name + " · " + fmtD(xs[cur]) + " · #" + (cur + 1);
+    tip.style.display = "block";
+    const left = px * k + 14 + 16, flip = left + tip.offsetWidth > el.clientWidth - 8;
+    tip.style.left = (flip ? px * k + 14 - tip.offsetWidth - 16 : left) + "px"; tip.style.top = "8px";
+  }
+  function hide() { for (const e of [cross, crossH, mark]) e.setAttribute("visibility", "hidden"); tip.style.display = "none"; }
+  svg.addEventListener("pointermove", e => {
+    const b = svg.getBoundingClientRect(), t = xs[0] + ((e.clientX - b.left) / b.width * W - m.l) / (W - m.l - m.r) * (xs[xs.length - 1] - xs[0]);
+    let a = 0, z = pts.length - 1;
+    while (z - a > 1) { const mid = (a + z) >> 1; xs[mid] < t ? a = mid : z = mid; }
+    show(Math.abs(xs[a] - t) < Math.abs(xs[z] - t) ? a : z);
+  });
+  svg.addEventListener("pointerleave", hide);
+  svg.addEventListener("focus", () => show(cur)); svg.addEventListener("blur", hide);
+  svg.addEventListener("keydown", e => { if (e.key === "ArrowLeft") show(cur - 1); if (e.key === "ArrowRight") show(cur + 1); });
+  el.append(svg, tip);
+}
+
+/* ---------- Histograma Monte Carlo ---------- */
+function histogram(el, counts, range, total) {
+  clear(el);
+  const W = Math.max(260, el.clientWidth - 28), H = 170, m = { l: 8, r: 8, t: 10, b: 24 };
+  const n = counts.length, w = (range[1] - range[0]) / n, mx = Math.max(...counts);
+  const svg = s("svg", { viewBox: `0 0 ${W} ${H}`, height: H, role: "img", "aria-label": "Distribución del profit factor en remuestreos" });
+  const bw = (W - m.l - m.r) / n, tip = h("div", { class: "tip" }), tb = h("b"), tl = h("div", { class: "muted" }); tip.append(tb, tl);
+  counts.forEach((c, i) => {
+    const a = range[0] + i * w, b = a + w, bh = c / mx * (H - m.t - m.b), good = (a + b) / 2 >= 1;
+    const r = s("rect", { x: m.l + i * bw + 1, y: H - m.b - bh, width: Math.max(1, bw - 2), height: Math.max(1, bh), rx: 2,
+      fill: good ? "#0ecb81" : "#f6465d", opacity: .85 });
+    r.addEventListener("pointerenter", () => {
+      r.setAttribute("opacity", 1); tb.textContent = "PF " + a.toFixed(2) + " – " + b.toFixed(2);
+      tl.textContent = c + " de " + total + " simulaciones (" + (c / total * 100).toFixed(1) + " %)";
+      tip.style.display = "block"; const k = svg.getBoundingClientRect().width / W, px = (m.l + (i + .5) * bw) * k + 14;
+      tip.style.left = Math.min(px, el.clientWidth - tip.offsetWidth - 8) + "px"; tip.style.top = "6px";
+    });
+    r.addEventListener("pointerleave", () => { r.setAttribute("opacity", .85); tip.style.display = "none"; });
+    svg.append(r);
+  });
+  const x1 = m.l + (1 - range[0]) / (range[1] - range[0]) * (W - m.l - m.r);
+  svg.append(s("line", { x1, x2: x1, y1: m.t - 4, y2: H - m.b, stroke: "#f0b90b", "stroke-width": 1.5, "stroke-dasharray": "4 3" }));
+  const lb = s("text", { x: x1 + 4, y: m.t + 6, "font-size": 11, fill: "#f0b90b" }); lb.textContent = "PF = 1"; svg.append(lb);
+  for (const [v, anchor] of [[range[0], "start"], [range[1], "end"]]) {
+    const t = s("text", { x: anchor === "start" ? m.l : W - m.r, y: H - 6, "text-anchor": anchor, "font-size": 11, fill: "#848e9c" });
+    t.textContent = v.toFixed(2); svg.append(t);
+  }
+  el.append(svg, tip);
+}
+
+/* ---------- En vivo ---------- */
+let LAST = {}, FILTER = "TODOS";
+function renderLive(d) {
+  const st = d.estado || {}, S = STATUS[st.estado] || STATUS.PAPEL;
+  clear($("estado")).append(h("span", { class: "pill live", style: "color:" + S.color }, h("span", { class: "dot" }), S.text));
+  $("hora").textContent = "datos " + ago(d.generado) + " · " + fmtT(d.generado);
+  clear($("banner"));
+  if (d.demo) $("banner").append(h("div", { class: "banner" }, "Datos de ejemplo: repetición del sistema sobre histórico real. Se reemplazan solos cuando el bot publique."));
+  const mk = d.mercado || {}, fng = mk.fng;
+  const fngCol = fng == null ? "var(--muted)" : fng < 25 ? "var(--red)" : fng < 45 ? "#f08a24" : fng <= 55 ? "var(--yellow)" : "var(--green)";
+  const pe = Math.round((st.p_edge ?? .5) * 100), done = (st.n ?? 0), need = done + (st.faltan_para_activa ?? 0);
+  clear($("tiles")).append(
+    tile("Resultado total", fmtR(st.total_r ?? 0), "caída actual " + fmtR(-(st.dd_r ?? 0)), cls(st.total_r)),
+    tile("Profit factor", fx(st.pf, 2), "acierto " + (st.n ? Math.round(st.win * 100) + " %" : "–"), pfCls(st.pf)),
+    tile("Cierres en vivo", done, st.faltan_para_activa ? "faltan " + st.faltan_para_activa + " para evaluar" : "muestra completa", "",
+      [need ? done / need * 100 : 100, "var(--yellow)"]),
+    tile("Prob. de ventaja", pe + " %", "necesita ≥ 90 % para ACTIVA", pe >= 90 ? "up" : "warn", [pe, pe >= 90 ? "var(--green)" : "var(--yellow)"]),
+    tile("Miedo y codicia", fng ?? "–", mk.fng_txt || "índice de mercado", "", fng == null ? null : [fng, fngCol]),
+    tile("Tono de noticias", fx(mk.score, 2), (mk.n ?? 0) + " titulares en 6 h", cls(mk.score)));
+  $("tiles").lastChild.previousSibling.querySelector(".value").style.color = fngCol;
+  for (const [id, list, open] of [["pendientes", d.pendientes || [], false], ["abiertas", d.abiertas || [], true]]) {
+    const el = clear($(id));
+    list.length ? list.forEach(o => el.append(orderCard(o, open)))
+      : el.append(h("div", { class: "empty" }, open ? "Ninguna posición abierta." : "Ninguna orden vigente en esta hora."));
+  }
+  const np = (d.pendientes || []).length, no = (d.abiertas || []).length;
+  $("n-pend").textContent = np; $("n-open").textContent = no;
+  $("tab-cnt").hidden = !(np + no); $("tab-cnt").textContent = np + no;
+  lineChart($("eq-live"), d.equity, "En vivo");
+  renderClosed(d);
+}
+function renderClosed(d) {
+  const all = d.cerradas || [], f = clear($("cl-filters"));
+  for (const k of ["TODOS", "TP", "SL", "TIEMPO"]) {
+    const n = k === "TODOS" ? all.length : all.filter(c => c.status === k).length;
+    f.append(h("button", { class: "fbtn", type: "button", "aria-pressed": String(FILTER === k),
+      onclick: () => { FILTER = k; renderClosed(d); } }, (k === "TODOS" ? "Todos" : k === "TIEMPO" ? "Tiempo" : k) + " " + n));
+  }
+  const rows = all.filter(c => FILTER === "TODOS" || c.status === FILTER).slice(0, 20).map(c => {
+    const R = RESULT[c.status] || RESULT.TIEMPO;
+    return [fmtT(c.closed_at), { v: base(c.symbol) + (c.side === "LONG" ? " ▲" : " ▼"), c: c.side === "LONG" ? "up" : "down" },
+      h("span", { class: "tag " + R[0] }, R[1]), { v: fmtR(c.r), c: cls(c.r) }];
+  });
+  table($("cerradas"), [{ t: "Cierre" }, { t: "Par" }, { t: "Salida" }, { t: "Resultado", r: 1 }], rows, "Todavía no hay cierres.");
+}
+
+/* ---------- Backtest ---------- */
+let SYM_SORT = "total_r";
+function renderBacktest(b) {
+  const e = b.elegida, mc = b.montecarlo, g = b.gbm || {}, ml = b.ml || {}, c = b.config;
+  $("bt-periodo").textContent = b.periodo.inicio + " → " + b.periodo.fin + " · " + b.simbolos.length + " pares · fuera de muestra desde " + b.periodo.oos_desde;
+  clear($("bt-veredicto")).append(h("b", {}, "Veredicto: " + b.veredicto.estado), " — " + b.veredicto.motivo + ". Config: " +
+    c.variante + " " + c.timeframe + ", SL " + c.sl_atr + "×ATR, RR " + c.rr + ".");
+  clear($("bt-tiles")).append(...[
+    tile("PF con cupo de " + c.max_abiertas, fx(e.cartera.pf, 2), e.cartera.n + " trades · " + e.cartera.por_semana + "/semana", pfCls(e.cartera.pf)),
+    tile("R total con cupo", fmtR(e.cartera.total_r), "caída máx. " + fmtR(-e.cartera.max_dd_r), cls(e.cartera.total_r)),
+    tile("PF fuera de muestra", fx(e.OOS.pf, 2), e.OOS.n + " trades · sin cupo", pfCls(e.OOS.pf)),
+    tile("Prob. PF > 1", fx(mc.prob_pf_mayor_1 * 100, 1) + " %", "Monte Carlo, " + mc.n_sims + " remuestreos", mc.prob_pf_mayor_1 >= .9 ? "up" : "warn",
+      [mc.prob_pf_mayor_1 * 100, "var(--green)"]),
+    tile("Caída máx. p95", mc.dd_pct_p95 + " %", "con " + mc.riesgo_pct + " % de riesgo por trade", "down"),
+    tile("p-valor vs azar", fx(g.p_valor, 3), "PF al azar " + fx(g.pf_nulo_media, 2), g.p_valor < .05 ? "up" : "warn"),
+    b.filtro ? tile("PF sin filtro OI/multitud", fx(b.filtro.sin_filtro.cartera.pf, 3), "mismo cupo", pfCls(b.filtro.sin_filtro.cartera.pf)) : null,
+    tile("AUC del modelo ML", fx(ml.auc_oof, 3), ml.enabled ? "filtro activo" : "no predice: filtro apagado", ml.enabled ? "up" : "muted")].filter(Boolean));
+  lineChart($("eq-bt"), e.equity, "Backtest");
+  renderSymbols(e.por_simbolo || []);
+  const L = (e.por_lado || {}).long, Sh = (e.por_lado || {}).short;
+  clear($("by-side")).append(...[["LONG", L, "long"], ["SHORT", Sh, "short"]].filter(x => x[1]).map(([t, v, k]) =>
+    h("div", { class: "order " + k, style: "padding:12px" },
+      h("span", { class: "side " + k, style: "margin:0" }, t),
+      h("div", { class: "num " + cls(v.total_r), style: "font-size:20px;font-weight:700;margin-top:8px" }, fmtR(v.total_r)),
+      h("div", { class: "meta num", style: "margin-top:4px" }, "PF " + fx(v.pf, 2) + " · " + v.n + " trades · acierto " + Math.round(v.win * 100) + " %"))));
+  $("mc-sub").textContent = "p5 " + fx(mc.pf_p5, 2) + " · mediana " + fx(mc.pf_p50, 2) + " · p95 " + fx(mc.pf_p95, 2);
+  if (mc.hist_pf) histogram($("mc-hist"), mc.hist_pf, mc.hist_pf_rango, mc.n_sims);
+  table($("bt-mes"), [{ t: "Mes" }, { t: "Trades", r: 1 }, { t: "Acierto", r: 1 }, { t: "PF", r: 1 }, { t: "Resultado", r: 1 }],
+    e.por_mes.map(m => [m.mes, m.n, Math.round(m.win * 100) + " %", { v: fx(m.pf, 2), c: pfCls(m.pf) }, { v: fmtR(m.total_r), c: cls(m.total_r) }]));
+  if (b.base) {
+    const rows = ["5m", "15m", "1h"].map(tf => { const x = b.base.filter(r => r.tf === tf); if (!x.length) return null;
+      const pf = x.map(r => r.OOS.pf), co = x.reduce((a, r) => a + r.IS.costo_r, 0) / x.length, br = x.reduce((a, r) => a + r.OOS.exp_r_bruto, 0) / x.length;
+      return [tf, { v: Math.min(...pf).toFixed(2) + " – " + Math.max(...pf).toFixed(2), c: Math.max(...pf) < 1 ? "down" : "" }, { v: fmtR(br), c: cls(br) }, co.toFixed(2) + " R"]; }).filter(Boolean);
+    table($("bt-base"), [{ t: "Temporalidad" }, { t: "PF neto (fuera de muestra)", r: 1 }, { t: "Bruto por trade", r: 1 }, { t: "Costo por trade", r: 1 }], rows);
+  }
+}
+function renderSymbols(list) {
+  const sb = clear($("sym-sort"));
+  for (const [k, t] of [["total_r", "R total"], ["pf", "PF"], ["n", "Trades"], ["simbolo", "Nombre"]])
+    sb.append(h("button", { class: "fbtn", type: "button", "aria-pressed": String(SYM_SORT === k), onclick: () => { SYM_SORT = k; renderSymbols(list); } }, t));
+  const key = SYM_SORT, val = r => key === "total_r" ? r.total_r : key === "pf" ? r.pf : r.n;
+  const rows = [...list].sort((a, b) => key === "simbolo" ? a.simbolo.localeCompare(b.simbolo) : (b[key] ?? -1e9) - (a[key] ?? -1e9));
+  const shown = key === "simbolo" ? "total_r" : key;
+  const vals = rows.map(r => shown === "total_r" ? r.total_r : shown === "pf" ? (r.pf ?? 0) - 1 : r.n);
+  const lo = Math.min(0, ...vals), hi = Math.max(0, ...vals), z = (0 - lo) / (hi - lo || 1) * 100;
+  const el = clear($("by-sym"));
+  rows.forEach((r, i) => {
+    const v = vals[i], a = (Math.min(0, v) - lo) / (hi - lo || 1) * 100, wdt = Math.abs(v) / (hi - lo || 1) * 100;
+    const col = shown === "n" ? "var(--blue)" : v >= 0 ? "var(--green)" : "var(--red)";
+    const label = shown === "total_r" ? fmtR(r.total_r) : shown === "pf" ? "PF " + fx(r.pf, 2) : r.n + " trades";
+    el.append(h("div", { class: "bar", title: `${base(r.simbolo)}: ${fmtR(r.total_r)} · PF ${fx(r.pf, 2)} · ${r.n} trades · acierto ${Math.round(r.win * 100)} %` },
+      h("b", {}, base(r.simbolo)),
+      h("div", { class: "t", style: `--z:${shown === "n" ? 0 : z}%` }, h("i", { style: `left:${shown === "n" ? 0 : a}%;width:${Math.max(.5, wdt)}%;background:${col}` })),
+      h("span", { class: "v num " + (shown === "n" ? "" : v >= 0 ? "up" : "down") }, label)));
+  });
+}
+
+/* ---------- Pestañas con #en-vivo / #backtest ---------- */
+function selectTab(name, push) {
+  for (const t of ["en-vivo", "backtest"]) {
+    $("tab-" + t).setAttribute("aria-selected", String(t === name)); $(t).hidden = t !== name;
+  }
+  if (push && location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+  if (name === "backtest" && LAST.bt) renderBacktest(LAST.bt);
+  if (name === "en-vivo" && LAST.live) renderLive(LAST.live);
+}
+$("tab-en-vivo").onclick = () => selectTab("en-vivo", true);
+$("tab-backtest").onclick = () => selectTab("backtest", true);
+addEventListener("hashchange", () => selectTab(location.hash === "#backtest" ? "backtest" : "en-vivo"));
+
+/* ---------- Carga y refresco ---------- */
+const PERIOD = 60, PRICE_PERIOD = 10;
+let left = PERIOD;
+function symbolsOfInterest() {
+  const d = LAST.live || {}, own = [...(d.abiertas || []), ...(d.pendientes || [])].map(o => o.symbol);
+  return [...new Set([...own, "BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"])];
+}
+async function refreshPrices() {
+  if (window.__DATA__) return;
+  const syms = symbolsOfInterest();
+  await fetchPrices(syms);
+  renderTicker(syms);
+  if (LAST.live && !$("en-vivo").hidden) {
+    for (const [id, list, open] of [["pendientes", LAST.live.pendientes || [], false], ["abiertas", LAST.live.abiertas || [], true]])
+      if (list.length) { const el = clear($(id)); list.forEach(o => el.append(orderCard(o, open))); }
+  }
+}
+async function load() {
+  left = PERIOD;
+  if (window.__DATA__) { LAST = { live: window.__DATA__.live, bt: window.__DATA__.bt }; renderLive(LAST.live); renderBacktest(LAST.bt); return; }
+  try { const r = await fetch("signals.json?t=" + Date.now(), { cache: "no-store" }); LAST.live = await r.json(); renderLive(LAST.live); }
+  catch (e) { clear($("banner")).append(h("div", { class: "banner err" }, "No se pudo leer signals.json. Esta página necesita servirse por HTTP (Vercel o python -m http.server).")); }
+  if (!LAST.bt) try { const r = await fetch("backtest.json", { cache: "no-store" }); LAST.bt = await r.json(); if (!$("backtest").hidden) renderBacktest(LAST.bt); } catch (e) {}
+  refreshPrices();
+}
+$("refresh").onclick = () => load();
+setInterval(() => {
+  left -= 1; if (left <= 0) load();
+  $("ring").setAttribute("stroke-dashoffset", String(37.7 * (1 - left / PERIOD)));
+  $("cd").textContent = left + " s";
+  if (left % PRICE_PERIOD === 0) refreshPrices();
+  if (LAST.live && left % 15 === 0) $("hora").textContent = "datos " + ago(LAST.live.generado) + " · " + fmtT(LAST.live.generado);
+}, 1000);
+selectTab(location.hash === "#backtest" ? "backtest" : "en-vivo");
+load();
+let rz; addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { LAST.live && !$("en-vivo").hidden && renderLive(LAST.live); LAST.bt && !$("backtest").hidden && renderBacktest(LAST.bt); }, 150); });
+</script>
+</body>
+</html>
