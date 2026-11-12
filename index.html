@@ -563,6 +563,8 @@ addEventListener("hashchange", () => selectTab(location.hash === "#backtest" ? "
 
 /* ---------- Carga y refresco ---------- */
 const PERIOD = 60, PRICE_PERIOD = 10;
+const RAW = "https://raw.githubusercontent.com/cglaffom/signals/main/";
+const SIGNALS_URL = RAW + "signals.json", BACKTEST_URL = RAW + "backtest.json";
 let left = PERIOD;
 function symbolsOfInterest() {
   const d = LAST.live || {}, own = [...(d.abiertas || []), ...(d.pendientes || [])].map(o => o.symbol);
@@ -581,9 +583,17 @@ async function refreshPrices() {
 async function load() {
   left = PERIOD;
   if (window.__DATA__) { LAST = { live: window.__DATA__.live, bt: window.__DATA__.bt }; renderLive(LAST.live); renderBacktest(LAST.bt); return; }
-  try { const r = await fetch("signals.json?t=" + Date.now(), { cache: "no-store" }); LAST.live = await r.json(); renderLive(LAST.live); }
-  catch (e) { clear($("banner")).append(h("div", { class: "banner err" }, "No se pudo leer signals.json. Esta página necesita servirse por HTTP (Vercel o python -m http.server).")); }
-  if (!LAST.bt) try { const r = await fetch("backtest.json", { cache: "no-store" }); LAST.bt = await r.json(); if (!$("backtest").hidden) renderBacktest(LAST.bt); } catch (e) {}
+  // Las señales se leen del repositorio público de GitHub (el bot las sube ahí), así la página
+  // se actualiza sin volver a publicarse. Si GitHub no responde, se usa la copia local.
+  let got = null;
+  for (const src of [SIGNALS_URL + "?t=" + Date.now(), "signals.json?t=" + Date.now()]) {
+    try { const r = await fetch(src, { cache: "no-store" }); if (r.ok) { got = await r.json(); break; } } catch (e) { /* probar la siguiente */ }
+  }
+  if (got) { LAST.live = got; renderLive(got); }
+  else clear($("banner")).append(h("div", { class: "banner err" }, "No se pudieron leer las señales. Revisa tu conexión; la página se vuelve a intentar sola cada minuto."));
+  if (!LAST.bt) for (const src of [BACKTEST_URL, "backtest.json"]) {
+    try { const r = await fetch(src, { cache: "no-store" }); if (!r.ok) continue; LAST.bt = await r.json(); if (!$("backtest").hidden) renderBacktest(LAST.bt); break; } catch (e) {}
+  }
   refreshPrices();
 }
 $("refresh").onclick = () => load();
